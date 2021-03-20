@@ -1,5 +1,6 @@
 '''
-Copyright 2019 Morgane Dufresne
+Copyright 2019 Morgane Dufresne  (KinectMocap4Blender version)
+Copyright 2021 Roberto Angeletti (OakMocap4Blender version)
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of
 this software and associated documentation files (the "Software"), to deal in
@@ -20,18 +21,17 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 '''
 bl_info = {
-    "name": "Kinect Motion Capture plugin",
-    "description": "Motion capture using MS Kinect v2",
-    "author": "Morgane Dufresne",
+    "name": "Oak Motion Capture plugin",
+    "description": "Motion capture using Oak",
+    "author": "Roberto Angeletti",
     "version": (1, 4),
-    "blender": (2, 80, 0),
+    "blender": (2, 79, 0),
     "support": "COMMUNITY",
     "category": "Animation"
 }
 
 import bpy
-import functools
-import kinectMocap4Blender
+#import OakMocap4Blender
 import mathutils
 from mathutils import Euler, Vector, Quaternion, Matrix
 from time import sleep
@@ -69,11 +69,9 @@ KBonesEnum = [("Head", "Head", "Head"),
     ("RightUpperArm", "RightUpperArm", "RightUpperArm"),
     ("RightLowerArm", "RightLowerArm", "RightLowerArm"),
     ("RightHand", "RightHand", "RightHand"),
-    ("LeftHip", "LeftHip", "LeftHip"),
     ("LeftUpperLeg", "LeftUpperLeg", "LeftUpperLeg"),
     ("LeftLowerLeg", "LeftLowerLeg", "LeftLowerLeg"),
     ("LeftFoot", "LeftFoot", "LeftFoot"),
-    ("RightHip", "RightHip", "RightHip"),
     ("RightUpperLeg", "RightUpperLeg", "RightUpperLeg"),
     ("RightLowerLeg", "RightLowerLeg", "RightLowerLeg"),
     ("RightFoot", "RightFoot", "RightFoot")
@@ -85,23 +83,23 @@ KalmanStrengthEnum = [("Strong", "Strong", "Strong denoising (ideal for slow mov
     ("VeryLow", "Very low", "Very low denoising (only for very fast movement, almost no noise reduction")
 ]
 
-class KMC_PG_KmcTarget(bpy.types.PropertyGroup):
-    name : bpy.props.StringProperty(name="KBone")
-    value : bpy.props.StringProperty(name="TBone", update=validateTarget)
+class KmcTarget(bpy.types.PropertyGroup):
+    name = bpy.props.StringProperty(name="KBone")
+    value = bpy.props.StringProperty(name="TBone", update=validateTarget)
 
-class KMC_PG_KmcProperties(bpy.types.PropertyGroup):
-    fps : bpy.props.IntProperty(name="fps", description="Tracking frames per second", default=24, min = 1, max = 60)
-    arma_list : bpy.props.EnumProperty(items = armature_callback, name="Armature", default=None)
-    targetBones : bpy.props.CollectionProperty(type = KMC_PG_KmcTarget)
-    isTracking : bpy.props.BoolProperty(name="Tracking status", description="tracking status")
-    stopTracking : bpy.props.BoolProperty(name="Stop trigger", description="tells to stop the tracking")
-    firstFramePosition : bpy.props.FloatVectorProperty(name="firstFramePosition", description="position of root bone in first frame", size=3)
-    initialOffset : bpy.props.FloatVectorProperty(name="initialOffset", description="position of root bone in rest pose", size=3)
-    lockHeight : bpy.props.BoolProperty(name="height", description="ignore vertical movement", default=True)
-    lockwidth : bpy.props.BoolProperty(name="width", description="ignore lateral movement", default=True)
-    lockDepth : bpy.props.BoolProperty(name="depth", description="ignore depth movement", default=True)
-    rootBone : bpy.props.EnumProperty(name="root bone", items=KBonesEnum, default="Spine0", description="Kinect identifier of the bone that is used as root of the skeleton")
-    kalmanStrength : bpy.props.EnumProperty(name="Denoising", items=KalmanStrengthEnum, default="Normal")
+class KmcProperties(bpy.types.PropertyGroup):
+    fps = bpy.props.IntProperty(name="fps", description="Tracking frames per second", default=24, min = 1, max = 60)
+    arma_list = bpy.props.EnumProperty(items = armature_callback, name="Armature", default=None)
+    targetBones = bpy.props.CollectionProperty(type = KmcTarget)
+    currentFrame = bpy.props.IntProperty(name="currentFrame", description="current recording frame", default=0)
+    record = bpy.props.BoolProperty(name="Record captured motion", description="activate recording while tracking")
+    firstFramePosition = bpy.props.FloatVectorProperty(name="firstFramePosition", description="position of root bone in first frame", size=3)
+    initialOffset = bpy.props.FloatVectorProperty(name="initialOffset", description="position of root bone in rest pose", size=3)
+    lockHeight = bpy.props.BoolProperty(name="height", description="ignore vertical movement", default=True)
+    lockwidth = bpy.props.BoolProperty(name="width", description="ignore lateral movement", default=True)
+    lockDepth = bpy.props.BoolProperty(name="depth", description="ignore depth movement", default=True)
+    rootBone = bpy.props.EnumProperty(name="root bone", items=KBonesEnum, default="Spine0", description="Kinect identifier of the bone that is used as root of the skeleton")
+    kalmanStrength = bpy.props.EnumProperty(name="Denoising", items=KalmanStrengthEnum, default="Normal")
 
 jointType = {
     "SpineBase":0,
@@ -123,7 +121,7 @@ jointType = {
     "HipRight":16,
     "KneeRight":17,
     "AnkleRight":18,
-    "FootRight":19,
+    "FoorRight":19,
     "SpineShoulder":20,
     "HandTipLeft":21,
     "ThumbLeft":22,
@@ -143,11 +141,9 @@ ordererBoneList = ["Head",
     "RightUpperArm",
     "RightLowerArm",
     "RightHand",
-    "LeftHip",
     "LeftUpperLeg",
     "LeftLowerLeg",
     "LeftFoot",
-    "RightHip",
     "RightUpperLeg",
     "RightLowerLeg",
     "RightFoot"]
@@ -165,11 +161,9 @@ defaultTargetBones = {
     "RightUpperArm":"RightArm",
     "RightLowerArm":"RightForeArm",
     "RightHand":"RightHand",
-    "LeftHip":"LeftHip",
     "LeftUpperLeg":"LeftUpLeg",
     "LeftLowerLeg":"LeftLeg",
     "LeftFoot":"LeftFoot",
-    "RightHip":"RightHip",
     "RightUpperLeg":"RightUpLeg",
     "RightLowerLeg":"RightLeg",
     "RightFoot":"RightFoot"
@@ -188,14 +182,12 @@ bonesDefinition = {
     "RightUpperArm":("ShoulderRight", "ElbowRight", None),
     "RightLowerArm":("ElbowRight", "WristRight", None),
     "RightHand":("WristRight", "HandRight", None),
-    "LeftHip":("SpineBase", "HipLeft", Vector((1,-1,0))),
     "LeftUpperLeg":("HipLeft", "KneeLeft", None),
     "LeftLowerLeg":("KneeLeft", "AnkleLeft", None),
     "LeftFoot":("AnkleLeft", "FootLeft", None),
-    "RightHip":("SpineBase", "HipRight", Vector((-1,-1,0))),
     "RightUpperLeg":("HipRight", "KneeRight", None),
     "RightLowerLeg":("KneeRight", "AnkleRight", None),
-    "RightFoot":("AnkleRight", "FootRight", None)
+    "RightFoot":("AnkleRight", "FoorRight", None)
 }
 
 restDirection = {}
@@ -207,22 +199,22 @@ def initialize(context):
     bpy.ops.pose.scale_clear()
     bpy.ops.pose.transforms_clear()
     bpy.ops.pose.select_all(action=('DESELECT'))
-    context.scene.kmc_props.stopTracking = False
+    context.scene.kmc_props.currentFrame = 0
     context.scene.kmc_props.firstFramePosition = (-1,-1,-1)
     context.scene.kmc_props.initialOffset = (0,0,0)
-    
+
     for target in context.scene.kmc_props.targetBones:
         if target.value is not None and target.value != "" :
             bone = bpy.data.objects[context.scene.kmc_props.arma_list].pose.bones[target.value]
             bone.rotation_mode = 'QUATERNION'
-            
-            # Store initial position of root bone
+
+            # Store initial position of spine0 bone
             if target.name == context.scene.kmc_props.rootBone:
                 context.scene.kmc_props.initialOffset = bpy.data.objects[context.scene.kmc_props.arma_list].pose.bones[target.value].matrix.translation
-            
+
             # Store rest pose angles for column, head and feet bones
             if bonesDefinition[target.name][2] is not None :
-                baseDir =  bonesDefinition[target.name][2] @ bone.matrix
+                baseDir =  bonesDefinition[target.name][2] * bone.matrix
                 restDirection[target.name] = baseDir.rotation_difference(Vector((0,1,0)))
 
 
@@ -265,7 +257,7 @@ def updatePose(context, bone):
                     bone.matrix.translation = (tx, tz, ty)
                 
                 # convert rotation in local coordinates
-                boneV = boneV @ bone.matrix
+                boneV = boneV * bone.matrix
                 
                 # compensate rest pose direction
                 if target.name in restDirection :
@@ -273,12 +265,14 @@ def updatePose(context, bone):
                 
                 # calculate desired rotation
                 rot = Vector((0,1,0)).rotation_difference(boneV)
-                bone.rotation_quaternion = bone.rotation_quaternion @ rot
-                
-                if context.scene.tool_settings.use_keyframe_insert_auto:
-                    bone.keyframe_insert(data_path="rotation_quaternion")
+                bone.rotation_quaternion = bone.rotation_quaternion * rot
+                if context.scene.kmc_props.currentFrame == 0:
+                    # first captured frame, initiate recording by setting the current frame to 1
+                    context.scene.kmc_props.currentFrame += 1
+                if context.scene.kmc_props.record :
+                    bone.keyframe_insert(data_path="rotation_quaternion", frame=context.scene.kmc_props.currentFrame)
                     if target.name == context.scene.kmc_props.rootBone:
-                        bone.keyframe_insert(data_path="location")
+                        bone.keyframe_insert(data_path="location", frame=context.scene.kmc_props.currentFrame)
                 
     # update child bones
     for child in bone.children :
@@ -289,13 +283,13 @@ def updatePose(context, bone):
 ###############################################
 
 # main panel
-class KMC_PT_KinectMocapPanel(bpy.types.Panel):
+class OakMocapPanel(bpy.types.Panel):
     """ Creates a panel in Pose mode """
-    bl_label = "Kinect Motion Capture Panel"
-    bl_idname = "KMC_PT_KinectMocapPanel"
+    bl_label = "Oak Motion Capture Panel"
+    bl_idname = "kmc_panel"
     bl_space_type = 'VIEW_3D'
-    bl_region_type = 'UI'
-    bl_category = "Kinect MoCap"
+    bl_region_type = 'TOOLS'
+    bl_category = "Oak MoCap"
     bl_context = "posemode"
     
     def draw(self, context):
@@ -316,8 +310,7 @@ class KMC_PT_KinectMocapPanel(bpy.types.Panel):
         else:
             # bones retargeting
             box = layout.box()
-            box.alignment = 'LEFT'
-            box.label(text="             Bone Targeting")
+            box.label("        Bone Targeting")
             for strBone in ordererBoneList :
                 for target in context.scene.kmc_props.targetBones :
                     if target.name == strBone :
@@ -337,17 +330,14 @@ class KMC_PT_KinectMocapPanel(bpy.types.Panel):
             # denoising strength
             layout.separator()
             layout.prop(context.scene.kmc_props, "kalmanStrength")
-            
+
             # activate
             layout.separator()
             layout.operator("kmc.start")
+            layout.label("(right clic or 'Esc' to stop)")
 
-            box = layout.box()
-            box.alignment = 'CENTER'
-            if context.scene.kmc_props.isTracking:
-                box.label(text="Status : tracking")
-            else:
-                box.label(text="Status : stopped")
+            # activate record mode
+            layout.prop(context.scene.kmc_props, "record")
             
     def __del__(self):
         pass
@@ -358,7 +348,7 @@ class KMC_PT_KinectMocapPanel(bpy.types.Panel):
 ###############################################
 
 # initialize system
-class KMC_OT_KmcInitOperator(bpy.types.Operator):
+class KmcInitOperator(bpy.types.Operator):
     bl_idname = "kmc.init"
     bl_label = "Initialize tracking system"
     
@@ -369,73 +359,59 @@ class KMC_OT_KmcInitOperator(bpy.types.Operator):
                 newTarget.value = ""
         return {'FINISHED'}
 
-# timer function
-def captureFrame(context):
-    framerate = 1.0 / context.scene.kmc_props.fps
-    
-    if(context.scene.k_sensor.update() == 1):
-        # update pose
-        updatePose(context, bpy.data.objects[context.scene.kmc_props.arma_list].pose.bones[0])
-
-    if context.scene.kmc_props.stopTracking:
-        context.scene.kmc_props.stopTracking = False
-        return None
-    else:
-        return framerate
-
 # start tracking
-class KMC_OT_KmcStartTrackingOperator(bpy.types.Operator):
+class KmcStartTrackingOperator(bpy.types.Operator):
     bl_idname = "kmc.start"
-    bl_label = "Start / Stop"
+    bl_label = "Start tracking"
     
-    def execute(self, context):
-
-        if context.scene.kmc_props.isTracking:
-            context.scene.kmc_props.stopTracking = True
-            context.scene.kmc_props.isTracking = False
-            context.scene.k_sensor.close()
-
-        else:
-            # init system
-            initialize(context)
+    def modal(self, context, event):
+        wm = context.window_manager
+        uNoise = 5.0
+        if context.scene.kmc_props.kalmanStrength == "VeryLow" :
+            uNoise=50.0
+        elif context.scene.kmc_props.kalmanStrength == "Low" :
+            uNoise=20.0
+        elif context.scene.kmc_props.kalmanStrength == "Normal" :
+            uNoise=5.0
+        elif context.scene.kmc_props.kalmanStrength == "Strong" :
+            uNoise=1.0
+        context.scene.k_sensor.init(1.0 / context.scene.kmc_props.fps, 0.0005, uNoise)
+        if event.type == 'TIMER':
+            if(context.scene.k_sensor.update() == 1):
+                # update pose
+                updatePose(context, bpy.data.objects[context.scene.kmc_props.arma_list].pose.bones[0])
+            if context.scene.kmc_props.currentFrame > 0 :
+                context.scene.kmc_props.currentFrame += 1
         
-            uNoise = 5.0
-            if context.scene.kmc_props.kalmanStrength == "VeryLow" :
-                uNoise=50.0
-            elif context.scene.kmc_props.kalmanStrength == "Low" :
-                uNoise=20.0
-            elif context.scene.kmc_props.kalmanStrength == "Normal" :
-                uNoise=5.0
-            elif context.scene.kmc_props.kalmanStrength == "Strong" :
-                uNoise=1.0
-            context.scene.k_sensor.init(1.0 / context.scene.kmc_props.fps, 0.0005, uNoise)
-            bpy.app.timers.register(functools.partial(captureFrame, context))
-            context.scene.kmc_props.isTracking = True
-
-        return {'FINISHED'}
-
+        elif event.type in {'RIGHTMOUSE', 'ESC'}:
+            # stop tracking
+            wm.event_timer_remove(self._timer)
+            context.scene.k_sensor.close()
+            return {'CANCELLED'}
+ 
+        return {'RUNNING_MODAL'}
+ 
+    def invoke(self, context, event):
+        # init system
+        initialize(context)
+        
+        # start tracking
+        wm = context.window_manager
+        framerate = 1.0 / context.scene.kmc_props.fps
+        self._timer = wm.event_timer_add(framerate, context.window)
+        context.window_manager.modal_handler_add(self)
+        return {'RUNNING_MODAL'}
 
 ###############################################
 #               Registration
 ###############################################
 
-classes = (
-    KMC_PG_KmcTarget,
-    KMC_PG_KmcProperties,
-    KMC_PT_KinectMocapPanel,
-    KMC_OT_KmcInitOperator,
-    KMC_OT_KmcStartTrackingOperator
-)
-
 def register():
-    for c in classes :
-        bpy.utils.register_class(c)
-    bpy.types.Scene.k_sensor = kinectMocap4Blender.Sensor()
-    bpy.types.Scene.kmc_props = bpy.props.PointerProperty(type=KMC_PG_KmcProperties)
+    bpy.utils.register_module(__name__)
+#    bpy.types.Scene.k_sensor = OakMocap4Blender.Sensor()
+    bpy.types.Scene.kmc_props = bpy.props.PointerProperty(type=KmcProperties)
 
 def unregister():
-    for c in reversed(classes) :
-        bpy.utils.register_class(c)
     bpy.utils.unregister_module(__name__)
     del bpy.types.Scene.k_sensor
     del bpy.types.Scene.kmc_props
